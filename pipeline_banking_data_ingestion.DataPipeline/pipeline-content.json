@@ -1,0 +1,227 @@
+{
+  "properties": {
+    "activities": [
+      {
+        "type": "ForEach",
+        "typeProperties": {
+          "isSequential": false,
+          "batchCount": 2,
+          "items": {
+            "value": "@pipeline().parameters.sources",
+            "type": "Expression"
+          },
+          "activities": [
+            {
+              "type": "Lookup",
+              "typeProperties": {
+                "source": {
+                  "type": "AzureSqlSource",
+                  "sqlReaderQuery": "@concat(\n    'SELECT source, updatedate, watermark_column FROM source_last_send WHERE source = ''',\n    item(),\n    ''''\n)",
+                  "partitionOption": "None",
+                  "queryTimeout": "02:00:00"
+                },
+                "datasetSettings": {
+                  "type": "AzureSqlTable",
+                  "typeProperties": {
+                    "database": "banking"
+                  },
+                  "schema": [],
+                  "externalReferences": {
+                    "connection": "2b279863-6d30-49ca-9328-f833e38fbdd3"
+                  },
+                  "annotations": []
+                },
+                "firstRowOnly": false
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Lookup updatedate",
+              "dependsOn": []
+            },
+            {
+              "type": "Copy",
+              "typeProperties": {
+                "source": {
+                  "type": "MySqlSource",
+                  "query": {
+                    "value": "@concat(\n    'SELECT * FROM ', activity('Lookup updatedate').output.value[0].source, ' WHERE ', activity('Lookup updatedate').output.value[0].watermark_column, ' > ''', formatDateTime(activity('Lookup updatedate').output.value[0].updatedate, 'yyyy-MM-dd HH:mm:ss.fff'), ''''\n)",
+                    "type": "Expression"
+                  },
+                  "datasetSettings": {
+                    "type": "MySqlTable",
+                    "schema": [],
+                    "externalReferences": {
+                      "connection": "2202a5f4-c5b9-444a-8ba8-f495ba981806"
+                    },
+                    "annotations": []
+                  }
+                },
+                "sink": {
+                  "type": "ParquetSink",
+                  "formatSettings": {
+                    "type": "ParquetWriteSettings",
+                    "enableVertiParquet": true
+                  },
+                  "storeSettings": {
+                    "type": "LakehouseWriteSettings"
+                  },
+                  "datasetSettings": {
+                    "type": "Parquet",
+                    "typeProperties": {
+                      "location": {
+                        "type": "LakehouseLocation",
+                        "folderPath": {
+                          "value": "@concat('landing/', item())",
+                          "type": "Expression"
+                        },
+                        "fileName": {
+                          "value": "@concat(item(), '_', formatDateTime(utcnow(), 'yyyyMMdd_HHmmssfff'), '.parquet')",
+                          "type": "Expression"
+                        }
+                      },
+                      "compressionCodec": "snappy"
+                    },
+                    "schema": [],
+                    "linkedService": {
+                      "name": "BankingLakehouse",
+                      "properties": {
+                        "type": "Lakehouse",
+                        "typeProperties": {
+                          "artifactId": "f61ee305-a1a5-b658-462e-f1da9df90484",
+                          "workspaceId": "00000000-0000-0000-0000-000000000000",
+                          "rootFolder": "Files"
+                        },
+                        "annotations": []
+                      }
+                    },
+                    "annotations": []
+                  }
+                },
+                "translator": {
+                  "type": "TabularTranslator",
+                  "typeConversion": true,
+                  "typeConversionSettings": {
+                    "allowDataTruncation": true,
+                    "treatBooleanAsNumber": false
+                  }
+                },
+                "enableStaging": false
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Copy data to bronze",
+              "dependsOn": [
+                {
+                  "activity": "Lookup updatedate",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "Lookup",
+              "typeProperties": {
+                "source": {
+                  "type": "MySqlSource",
+                  "query": {
+                    "value": "@concat(\n    'SELECT MAX(',activity('Lookup updatedate').output.value[0].watermark_column, ') AS max_updated_at FROM ', activity('Lookup updatedate').output.value[0].source\n)",
+                    "type": "Expression"
+                  }
+                },
+                "datasetSettings": {
+                  "type": "MySqlTable",
+                  "schema": [],
+                  "externalReferences": {
+                    "connection": "2202a5f4-c5b9-444a-8ba8-f495ba981806"
+                  },
+                  "annotations": []
+                }
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Lookup MAX updated_at",
+              "dependsOn": [
+                {
+                  "activity": "Copy data to bronze",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "Script",
+              "typeProperties": {
+                "database": "banking",
+                "scripts": [
+                  {
+                    "text": {
+                      "value": "@concat(\n    'UPDATE dbo.source_last_send SET updatedate = ''',\n    activity('Lookup MAX updated_at').output.firstRow.max_updated_at,\n    ''' WHERE source = ''',\n    activity('Lookup updatedate').output.value[0].source,\n    ''''\n)",
+                      "type": "Expression"
+                    },
+                    "type": "Query"
+                  }
+                ],
+                "scriptBlockExecutionTimeout": "02:00:00"
+              },
+              "externalReferences": {
+                "connection": "2b279863-6d30-49ca-9328-f833e38fbdd3"
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Script Update source_last_send",
+              "dependsOn": [
+                {
+                  "activity": "Lookup MAX updated_at",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "name": "ForEach table",
+        "dependsOn": []
+      }
+    ],
+    "parameters": {
+      "sources": {
+        "type": "array",
+        "defaultValue": [
+          "accounts",
+          "branches",
+          "card_transactions",
+          "cards",
+          "customers",
+          "employees",
+          "loan_payments",
+          "loans",
+          "support_tickets",
+          "transactions"
+        ]
+      }
+    }
+  }
+}

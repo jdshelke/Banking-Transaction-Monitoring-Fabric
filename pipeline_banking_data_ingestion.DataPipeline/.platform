@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "DataPipeline",
+    "displayName": "pipeline_banking_data_ingestion"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "89e33b7b-056b-ab7a-43ef-3338b8a92918"
+  }
+}
