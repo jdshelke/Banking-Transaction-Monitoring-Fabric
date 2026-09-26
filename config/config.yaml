@@ -1,0 +1,2 @@
+adls:
+  base_path: abfss://banking-transaction-monitoring@project1storageacc.dfs.core.windows.net
